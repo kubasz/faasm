@@ -1454,7 +1454,10 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(env,
     win->size = size;
     win->dispUnit = dispUnit;
     win->rank = ctx.rank;
+    // FIXME: Look at upstream fix once it gets made
+    #ifdef __wasm__
     win->wasmPtr = basePtr;
+    #endif
 
     U8* hostPtr =
       &Runtime::memoryRef<U8>(getExecutingWAVMModule()->defaultMemory, basePtr);
@@ -1631,7 +1634,10 @@ WAVM_DEFINE_INTRINSIC_FUNCTION(env,
 
     // MPI_WIN_BASE is special as we're passing back a pointer
     if (attrKey == MPI_WIN_BASE) {
+      // FIXME: Look at upstream fix once it gets made
+    #ifdef __wasm__
         ctx.writeMpiResult<int>(attrResPtrPtr, window->wasmPtr);
+    #endif
     } else {
         // The result is a pointer to a pointer, so for everything other than
         // MPI_WIN_BASE we need to doubly translate it

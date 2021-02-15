@@ -87,6 +87,7 @@ endif ()
 
 add_subdirectory(errors)
 add_subdirectory(demo)
+add_subdirectory(ndp)
 add_subdirectory(dynlink)
 add_subdirectory(mpi)
 add_subdirectory(omp)

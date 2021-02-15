@@ -64,7 +64,7 @@ void codegenForDirectory(std::string& inputPath)
 
 int main(int argc, char* argv[])
 {
-    faabric::util::initLogging();
+    // faabric::util::initLogging();
     const std::shared_ptr<spdlog::logger> logger = faabric::util::getLogger();
 
     if (argc < 2) {

@@ -243,6 +243,7 @@ void linkHook()
     messagesLink();
     mpiLink();
     networkLink();
+    ndpLink();
     ompLink();
     processLink();
     schedulingLink();

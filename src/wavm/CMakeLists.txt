@@ -25,6 +25,7 @@ set(LIB_FILES
         memory.cpp
         messages.cpp
         mpi.cpp
+        ndp_objects.cpp
         network.cpp
         openmp.cpp
         OMPThreadPool.cpp

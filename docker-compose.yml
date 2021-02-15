@@ -21,7 +21,7 @@ services:
       - ./container/shared_store/:/usr/local/faasm/shared_store/
     environment:
       - FUNCTION_STORAGE=local
-      - LOG_LEVEL=info
+      - LOG_LEVEL=debug
       - PYTHON_CODEGEN=off
       - REDIS_QUEUE_HOST=redis-queue
       - REDIS_STATE_HOST=redis-state
@@ -42,7 +42,33 @@ services:
       - FILESERVER_URL=http://${UPLOAD_HOST:-upload}:8002
       - FUNCTION_STORAGE=fileserver
       - GLOBAL_MESSAGE_TIMEOUT=600000
-      - LOG_LEVEL=info
+      - LOG_LEVEL=debug
+      - MAX_IN_FLIGHT_RATIO=1
+      - MAX_FAASLETS=20
+      - MAX_FAASLETS_PER_FUNCTION=4
+      - NETNS_MODE=off
+      - REDIS_QUEUE_HOST=redis-queue
+      - REDIS_STATE_HOST=redis-state
+      - LD_LIBRARY_PATH=/build/faasm/third-party/lib:/usr/local/lib
+
+  worker-storage:
+    image: faasm/worker:${FAASM_VERSION}
+    depends_on:
+      - upload
+    expose:
+      - "8080"
+    privileged: yes
+    volumes:
+      - ./build/:${FAASM_BUILD_MOUNT}
+      - ./container/shared_store/:/usr/local/faasm/shared_store/
+    environment:
+      - CAPTURE_STDOUT=on
+      - CGROUP_MODE=on
+      - FILESERVER_URL=http://${UPLOAD_HOST:-upload}:8002
+      - FUNCTION_STORAGE=fileserver
+      - IS_STORAGE_NODE=1
+      - GLOBAL_MESSAGE_TIMEOUT=600000
+      - LOG_LEVEL=debug
       - MAX_IN_FLIGHT_RATIO=1
       - MAX_FAASLETS=20
       - MAX_FAASLETS_PER_FUNCTION=4
@@ -57,6 +83,7 @@ services:
       - ./deploy/conf/nginx-local.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - worker
+      - worker-storage
     ports:
       - "8080:8080"
 
@@ -79,6 +106,7 @@ services:
     volumes:
       - .:/usr/local/code/faasm/
       - ./build/:/build/faasm/
+      - ../faabric/include/faabric:/usr/local/faasm/native/include/faabric
       - ./container/machine-code/:/usr/local/faasm/object/
       - ./container/shared_store/:/usr/local/faasm/shared_store/
       - /var/run/docker.sock:/var/run/docker.sock
