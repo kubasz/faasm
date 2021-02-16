@@ -107,6 +107,7 @@ services:
       - .:/usr/local/code/faasm/
       - ./build/:/build/faasm/
       - ../faabric/include/faabric:/usr/local/faasm/native/include/faabric
+      - ../faasm-toolchain/libfaasm/faasm.imports:/usr/local/faasm/llvm-sysroot/lib/wasm32-wasi/libfaasm.imports
       - ./container/machine-code/:/usr/local/faasm/object/
       - ./container/shared_store/:/usr/local/faasm/shared_store/
       - /var/run/docker.sock:/var/run/docker.sock

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <faabric/proto/faabric.pb.h>
 
 namespace wasm {
 
@@ -16,4 +17,7 @@ int makeChainedCall(const std::string& functionName,
                     int wasmFuncPtr,
                     const char* pyFunc,
                     const std::vector<uint8_t>& inputData);
+
+faabric::Message awaitChainedCallMessage(unsigned int messageId);
+
 }

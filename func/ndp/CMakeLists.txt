@@ -13,6 +13,7 @@ endfunction(ndp_func_c)
 #ndp_func(argc_argv argc_argv.cpp)
 #ndp_func_c(c_example c_example.c)
 ndp_func(get_simple get_simple.cpp)
+ndp_func(put_simple put_simple.cpp)
 
 # 23/09/2020 - removing simd
 # WASM-only functions

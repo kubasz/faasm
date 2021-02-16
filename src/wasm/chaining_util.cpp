@@ -134,4 +134,20 @@ int awaitChainedCallOutput(unsigned int messageId,
 
     return result.returnvalue();
 }
+
+faabric::Message awaitChainedCallMessage(unsigned int messageId)
+{
+    const std::shared_ptr<spdlog::logger>& logger = faabric::util::getLogger();
+    int callTimeoutMs = faabric::util::getSystemConfig().chainedCallTimeout;
+
+    faabric::scheduler::Scheduler& sch = faabric::scheduler::getScheduler();
+    const faabric::Message result =
+      sch.getFunctionResult(messageId, callTimeoutMs);
+
+    if (result.type() == faabric::Message_MessageType_EMPTY) {
+        logger->error("Cannot find output for {}", messageId);
+    }
+
+    return result;
+}
 }
