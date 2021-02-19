@@ -59,11 +59,11 @@ struct BuiltinNdpGetArgs {
         return std::vector<uint8_t>(outStr.begin(), outStr.end());
     }
 
-    inline static BuiltinNdpPutArgs fromBytes(const std::vector<uint8_t>& bytes) {
+    inline static BuiltinNdpGetArgs fromBytes(const std::vector<uint8_t>& bytes) {
         std::string inStr(bytes.begin(), bytes.end());
         std::stringstream in(inStr);
         cereal::PortableBinaryInputArchive ar(in);
-        BuiltinNdpPutArgs out;
+        BuiltinNdpGetArgs out;
         ar(out);
         return out;
     }

@@ -6,6 +6,7 @@ file(GLOB HEADERS "${FAASM_INCLUDE_DIR}/faaslet/*.h")
 
 set(LIB_FILES
         Faaslet.cpp
+        NdpBuiltinModule.cpp
         ${HEADERS}
         )
 

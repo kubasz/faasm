@@ -29,7 +29,8 @@ int awaitChainedCall(unsigned int messageId)
 int makeChainedCall(const std::string& functionName,
                     int wasmFuncPtr,
                     const char* pyFuncName,
-                    const std::vector<uint8_t>& inputData)
+                    const std::vector<uint8_t>& inputData,
+                    bool isStorage)
 {
     faabric::scheduler::Scheduler& sch = faabric::scheduler::getScheduler();
     faabric::Message* originalCall = getExecutingCall();
@@ -41,6 +42,7 @@ int makeChainedCall(const std::string& functionName,
     call.set_inputdata(inputData.data(), inputData.size());
     call.set_funcptr(wasmFuncPtr);
     call.set_isasync(true);
+    call.set_isstorage(isStorage);
 
     call.set_pythonuser(originalCall->pythonuser());
     call.set_pythonfunction(originalCall->pythonfunction());

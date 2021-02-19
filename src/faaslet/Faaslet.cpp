@@ -11,7 +11,9 @@
 #include <module_cache/WasmModuleCache.h>
 
 #include <wamr/WAMRWasmModule.h>
-#include <wavm/WAVMWasmModule.h>
+#include <wamr/WAMRWasmModule.h>
+
+#include <faaslet/NdpBuiltinModule.h>
 
 #if (FAASM_SGX)
 #include <sgx/SGXWAMRWasmModule.h>
@@ -23,6 +25,10 @@ using namespace isolation;
 namespace faaslet {
 
 std::mutex flushMutex;
+
+static bool isBuiltin(const std::string& funcName) {
+    return !funcName.empty() && funcName.at(0) == '!';
+}
 
 void preloadPythonRuntime()
 {
@@ -104,7 +110,7 @@ void Faaslet::preFinishCall(faabric::Message& call,
 
     // Add captured stdout if necessary
     faabric::util::SystemConfig& conf = faabric::util::getSystemConfig();
-    if (conf.captureStdout == "on") {
+    if (conf.captureStdout == "on" && !isBuiltin(call.function())) {
         std::string moduleStdout = module->getCapturedStdout();
         if (!moduleStdout.empty()) {
             std::string newOutput = moduleStdout + "\n" + call.outputdata();
@@ -114,7 +120,7 @@ void Faaslet::preFinishCall(faabric::Message& call,
         }
     }
 
-    if (conf.wasmVm == "wavm") {
+    if (conf.wasmVm == "wavm" && !isBuiltin(call.function())) {
         // Restore from zygote
         logger->debug("Resetting module {} from zygote", funcStr);
         module_cache::WasmModuleCache& registry =
@@ -131,7 +137,10 @@ void Faaslet::postBind(const faabric::Message& msg, bool force)
     faabric::util::SystemConfig& conf = faabric::util::getSystemConfig();
 
     // Instantiate the right wasm module for the chosen runtime
-    if (conf.wasmVm == "wamr") {
+    if (isBuiltin(msg.function())) {
+        module = std::make_unique<wasm::NDPBuiltinModule>();
+        module->bindToFunction(msg);
+    } else if (conf.wasmVm == "wamr") {
 #if (FAASM_SGX)
         // When SGX is enabled, we may still be running with vanilla WAMR
         if (msg.issgx()) {
@@ -170,7 +179,7 @@ bool Faaslet::doExecute(faabric::Message& msg)
 
     // Check if we need to restore from a different snapshot
     auto conf = faabric::util::getSystemConfig();
-    if (conf.wasmVm == "wavm") {
+    if (conf.wasmVm == "wavm" && !isBuiltin(msg.function())) {
         const std::string snapshotKey = msg.snapshotkey();
         if (!snapshotKey.empty() && !msg.issgx()) {
             PROF_START(snapshotOverride)
