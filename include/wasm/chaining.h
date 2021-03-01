@@ -21,4 +21,9 @@ int makeChainedCall(const std::string& functionName,
 
 faabric::Message awaitChainedCallMessage(unsigned int messageId);
 
+int chainNdpCall(const std::string& snapshotKey,
+                       size_t snapshotSize,
+                 const std::string& inputData,
+                       int funcPtr);
+
 }

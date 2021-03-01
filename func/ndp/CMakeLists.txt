@@ -15,6 +15,7 @@ endfunction(ndp_func_c)
 ndp_func(get_simple get_simple.cpp)
 ndp_func(put_simple put_simple.cpp)
 ndp_func(wordcount wordcount.cpp)
+ndp_func(wordcount_manual_ndp wordcount_manual_ndp.cpp)
 
 # 23/09/2020 - removing simd
 # WASM-only functions

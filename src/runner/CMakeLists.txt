@@ -1,7 +1,7 @@
 set(RUNNER_LIBS
-        faaslet_lib
         wavmmodule
         wamrmodule
+        faaslet_lib
         module_cache
         system
         )

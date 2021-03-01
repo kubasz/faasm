@@ -2,7 +2,7 @@
 #include <wavm/WAVMWasmModule.h>
 
 #include <boost/filesystem.hpp>
-#include <cereal/archives/binary.hpp>
+#include <cereal/archives/portable_binary.hpp>
 #include <stdexcept>
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -846,6 +846,14 @@ bool WAVMWasmModule::execute(faabric::Message& msg, bool forceNoop)
     Runtime::Function* funcInstance;
     IR::FunctionType funcType;
 
+    if (msg.isoutputmemorydelta()) {
+        Uptr numPages = Runtime::getMemoryNumPages(defaultMemory);
+        U8* memBase = Runtime::getMemoryBaseAddress(defaultMemory);
+        U8* memEnd = memBase + (numPages * WASM_BYTES_PER_PAGE);
+        this->preExecuteMemoryData.numPages = numPages;
+        this->preExecuteMemoryData.data = std::vector<uint8_t>(memBase, memEnd);
+    }
+
     if (funcPtr > 0) {
         // Get the function this pointer refers to
         funcInstance = getFunctionFromPtr(funcPtr);
@@ -922,6 +930,12 @@ bool WAVMWasmModule::execute(faabric::Message& msg, bool forceNoop)
 
     // Record the return value
     msg.set_returnvalue(returnValue);
+
+    if (returnValue == 0 && msg.isoutputmemorydelta()) {
+        std::ostringstream ss;
+        this->deltaSnapshot(ss);
+        msg.set_outputdata(ss.str());
+    }
 
     return success;
 }
@@ -1389,18 +1403,133 @@ void WAVMWasmModule::mapMemoryFromFd()
          0);
 }
 
-void WAVMWasmModule::doSnapshot(std::ostream& outStream)
-{
-    cereal::BinaryOutputArchive archive(outStream);
-
+wasm::MemorySerialised copyMemory(const WAVMWasmModule* thisModule) {
     // Serialise memory
-    Uptr numPages = Runtime::getMemoryNumPages(defaultMemory);
-    U8* memBase = Runtime::getMemoryBaseAddress(defaultMemory);
+    Uptr numPages = Runtime::getMemoryNumPages(thisModule->defaultMemory);
+    U8* memBase = Runtime::getMemoryBaseAddress(thisModule->defaultMemory);
     U8* memEnd = memBase + (numPages * WASM_BYTES_PER_PAGE);
 
     wasm::MemorySerialised mem;
     mem.numPages = numPages;
     mem.data = std::vector<uint8_t>(memBase, memEnd);
+    return mem;
+}
+
+constexpr uint8_t DELTA_PROTOCOL_VERSION = 1;
+constexpr size_t DELTA_PAGE_BYTES = 1024;
+constexpr size_t PAGES_DELTA_PER_WASM = (WASM_BYTES_PER_PAGE / DELTA_PAGE_BYTES);
+const uint8_t EMPTY_DELTA_PAGE[DELTA_PAGE_BYTES] = {0};
+
+enum DeltaCommand : uint8_t {
+    DELTACMD_MEMORY_PAGES = 0,
+    DELTACMD_CHANGE_1KPAGE = 1,
+    DELTACMD_NDP_WASMPAGE = 2,
+    DELTACMD_END = 0xFE,
+};
+
+void WAVMWasmModule::deltaSnapshot(std::ostream& outStream)
+{
+    const bool debugprint_bytecounts = true;
+    uint64_t modifiedSent{}, actuallyModified{};
+
+    cereal::PortableBinaryOutputArchive archive(outStream);
+    const wasm::MemorySerialised& oldMemory = this->preExecuteMemoryData;
+    const wasm::MemorySerialised& newMemory = copyMemory(this);
+    archive((uint8_t)DELTA_PROTOCOL_VERSION);
+    archive(DELTACMD_MEMORY_PAGES, (uint64_t)newMemory.numPages);
+    faabric::util::getLogger()->debug("Generating delta snapshot");
+    for(auto [start, len] : this->ndpMappedPtrLens) {
+        faabric::util::getLogger()->debug("Found NDP mapping from {} len {}", start, len);
+    }
+    for (size_t wasmPage = 0; wasmPage < newMemory.numPages; wasmPage ++) {
+        // skip NDP-processed data (but notify the other side that it was there)
+        if (std::any_of(this->ndpMappedPtrLens.begin(),
+            this->ndpMappedPtrLens.end(),
+            [&](std::pair<Uptr, Uptr> mappedRange) {
+                return (wasmPage >= mappedRange.first) &&
+                    (wasmPage < (mappedRange.first + mappedRange.second));
+            })) {
+            archive(DELTACMD_NDP_WASMPAGE, (uint64_t)wasmPage);
+        } else {
+            size_t endPage1k = (wasmPage + 1) * PAGES_DELTA_PER_WASM;
+            for (size_t page1k = wasmPage * PAGES_DELTA_PER_WASM; page1k < endPage1k; page1k++) {
+                const U8* oldData = (wasmPage < oldMemory.numPages)
+                    ? (oldMemory.data.data() + page1k * DELTA_PAGE_BYTES)
+                    : (EMPTY_DELTA_PAGE);
+                const U8* newData = newMemory.data.data() + page1k * DELTA_PAGE_BYTES;
+                if (!std::equal(oldData, oldData + DELTA_PAGE_BYTES, newData)) {
+                    archive(DELTACMD_CHANGE_1KPAGE, (uint64_t) page1k);
+                    archive.saveBinary<1>(newData, DELTA_PAGE_BYTES);
+                    if (debugprint_bytecounts) {
+                        modifiedSent += DELTA_PAGE_BYTES;
+                        for(size_t i=0; i<DELTA_PAGE_BYTES; i++) {
+                            if (oldData[i] != newData[i]) {
+                                actuallyModified++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    archive(DELTACMD_END);
+
+    if(debugprint_bytecounts) {
+        const std::shared_ptr<spdlog::logger>& logger = faabric::util::getLogger();
+        logger->debug("Delta Snapshot bytes: modified sent {}, actually modified {}", modifiedSent, actuallyModified);
+    }
+}
+
+void WAVMWasmModule::deltaRestore(std::istream& inStream)
+{
+
+    cereal::PortableBinaryInputArchive archive(inStream);
+    uint8_t protocolVersion{};
+    archive(protocolVersion);
+    if (protocolVersion != DELTA_PROTOCOL_VERSION) {
+        throw std::runtime_error("Invalid delta protocol version");
+    }
+    uint8_t deltaCmd{};
+    Runtime::Memory* memory = this->defaultMemory;
+    do {
+        archive(deltaCmd);
+        switch (deltaCmd) {
+            case DELTACMD_MEMORY_PAGES: {
+                uint64_t pageCount{};
+                archive(pageCount);
+                uint64_t myPages = Runtime::getMemoryNumPages(memory);
+                if (myPages < pageCount) {
+                    size_t newPages = pageCount - myPages;
+                    this->mmapPages(newPages);
+                }
+                break;
+            }
+            case DELTACMD_NDP_WASMPAGE: {
+                uint64_t wasmPage{};
+                archive(wasmPage);
+                break;
+            }
+            case DELTACMD_CHANGE_1KPAGE: {
+                uint64_t page1k{};
+                archive(page1k);
+                U8* dataStart = Runtime::memoryArrayPtr<U8>(memory, page1k * DELTA_PAGE_BYTES, DELTA_PAGE_BYTES);
+                archive.loadBinary<1>(dataStart, DELTA_PAGE_BYTES);
+                break;
+            }
+            case DELTACMD_END: break;
+            default: {
+                throw std::invalid_argument(std::string("Invalid delta protocol command: ")
+                        + std::to_string(deltaCmd));
+            }
+        }
+    } while (deltaCmd != DELTACMD_END);
+}
+
+void WAVMWasmModule::doSnapshot(std::ostream& outStream)
+{
+    cereal::PortableBinaryOutputArchive archive(outStream);
+
+    wasm::MemorySerialised mem = copyMemory(this);
 
     // Serialise to file
     archive(mem);
@@ -1408,7 +1537,7 @@ void WAVMWasmModule::doSnapshot(std::ostream& outStream)
 
 void WAVMWasmModule::doRestore(std::istream& inStream)
 {
-    cereal::BinaryInputArchive archive(inStream);
+    cereal::PortableBinaryInputArchive archive(inStream);
 
     // Read in serialised data
     wasm::MemorySerialised mem;
@@ -1416,7 +1545,7 @@ void WAVMWasmModule::doRestore(std::istream& inStream)
 
     // Restore memory
     Uptr currentNumPages = Runtime::getMemoryNumPages(defaultMemory);
-    size_t pagesRequired = mem.numPages - currentNumPages;
+    ssize_t pagesRequired = mem.numPages - currentNumPages;
     if (pagesRequired > 0) {
         mmapPages(pagesRequired);
     }

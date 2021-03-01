@@ -152,4 +152,44 @@ faabric::Message awaitChainedCallMessage(unsigned int messageId)
 
     return result;
 }
+
+int chainNdpCall(const std::string& snapshotKey,
+                       size_t snapshotSize,
+                 const std::string& inputData,
+                       int funcPtr)
+{
+    faabric::scheduler::Scheduler& sch = faabric::scheduler::getScheduler();
+
+    faabric::Message* originalCall = getExecutingCall();
+    faabric::Message call = faabric::util::messageFactory(
+      originalCall->user(), originalCall->function());
+    call.set_isasync(true);
+
+    // Snapshot details
+    call.set_snapshotkey(snapshotKey);
+    call.set_snapshotsize(snapshotSize);
+
+    // Function pointer and args
+    call.set_funcptr(funcPtr);
+    call.set_inputdata(inputData);
+    call.set_isstorage(true);
+    call.set_isoutputmemorydelta(true);
+
+    const std::string origStr =
+      faabric::util::funcToString(*originalCall, false);
+    const std::string chainedStr = faabric::util::funcToString(call, false);
+
+    // Schedule the call
+    sch.callFunction(call);
+    faabric::util::getLogger()->debug(
+      "Chained NDP call {} ({}) -> {} {}() ({})",
+      origStr,
+      faabric::util::getSystemConfig().endpointHost,
+      chainedStr,
+      funcPtr,
+      call.scheduledhost());
+
+    return call.id();
+}
+
 }

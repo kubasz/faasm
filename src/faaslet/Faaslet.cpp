@@ -110,7 +110,7 @@ void Faaslet::preFinishCall(faabric::Message& call,
 
     // Add captured stdout if necessary
     faabric::util::SystemConfig& conf = faabric::util::getSystemConfig();
-    if (conf.captureStdout == "on" && !isBuiltin(call.function())) {
+    if (conf.captureStdout == "on" && !isBuiltin(call.function()) && !call.isoutputmemorydelta()) {
         std::string moduleStdout = module->getCapturedStdout();
         if (!moduleStdout.empty()) {
             std::string newOutput = moduleStdout + "\n" + call.outputdata();

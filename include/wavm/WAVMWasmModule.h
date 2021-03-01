@@ -1,5 +1,6 @@
 #pragma once
 
+#include <wasm/serialisation.h>
 #include <wasm/WasmModule.h>
 #include <wavm/LoadedDynamicModule.h>
 
@@ -131,6 +132,12 @@ class WAVMWasmModule final
 
     std::unique_ptr<openmp::PlatformThreadPool>& getOMPPool();
 
+    std::vector<std::pair<WAVM::Uptr, WAVM::Uptr>> ndpMappedPtrLens;
+
+    void deltaSnapshot(std::ostream& outStream);
+
+    void deltaRestore(std::istream& inStream);
+
   protected:
     void doSnapshot(std::ostream& outStream) override;
 
@@ -143,6 +150,8 @@ class WAVMWasmModule final
 
     int memoryFd = -1;
     size_t memoryFdSize = 0;
+
+    wasm::MemorySerialised preExecuteMemoryData;
 
     bool _isBound = false;
 

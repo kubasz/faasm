@@ -62,7 +62,7 @@ static int ndpPut(NDPBuiltinModule& module, faabric::Message& msg) {
     return 0;
 }
 
-const static std::array<BuiltinFunction, 2> NDP_BUILTINS{{
+const std::array<BuiltinFunction, 2> NDP_BUILTINS{{
     {BUILTIN_NDP_GET_FUNCTION, &ndpGet},
     {BUILTIN_NDP_PUT_FUNCTION, &ndpPut}
 }};
@@ -102,11 +102,7 @@ void NDPBuiltinModule::bindToFunction(const faabric::Message& msg)
     _isBound = true;
     boundUser = msg.user();
     boundFunction = functionName;
-    auto fn = std::find_if(NDP_BUILTINS.cbegin(), NDP_BUILTINS.cend(), [&](const BuiltinFunction& f){return f.name == functionName;});
-    if (fn == NDP_BUILTINS.cend()) {
-        throw std::runtime_error("Invalid builtin name");
-    }
-    boundFn = &*fn;
+    boundFn = &getNdpBuiltin(functionName);
 }
 
 void NDPBuiltinModule::bindToFunctionNoZygote(const faabric::Message& msg)

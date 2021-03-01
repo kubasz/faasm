@@ -1,6 +1,7 @@
 #pragma once
 
 #include <wasm/WasmModule.h>
+#include <wasm/ndp.h>
 #include <string>
 #include <vector>
 #include <functional>
@@ -8,11 +9,6 @@
 namespace wasm {
 
 class NDPBuiltinModule;
-
-struct BuiltinFunction {
-    const char *name;
-    int (*function)(NDPBuiltinModule&, faabric::Message&);
-};
 
 class NDPBuiltinModule final
   : public WasmModule
