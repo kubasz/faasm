@@ -4,6 +4,7 @@ set(RUNNER_LIBS
         faaslet_lib
         module_cache
         system
+        zstd::libzstd_static
         )
 
 add_executable(func_runner func_runner.cpp)

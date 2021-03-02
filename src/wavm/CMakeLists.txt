@@ -41,4 +41,4 @@ set(LIB_FILES
 
 faasm_private_lib(wavmmodule "${LIB_FILES}")
 add_dependencies(wavmmodule cereal_ext)
-target_link_libraries(wavmmodule wasm ir_cache libWAVM)
+target_link_libraries(wavmmodule PUBLIC wasm ir_cache libWAVM zstd::libzstd_static)

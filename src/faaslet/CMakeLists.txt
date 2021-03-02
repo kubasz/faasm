@@ -17,6 +17,7 @@ target_link_libraries(faaslet_lib
         module_cache
         system
         wamrmodule
+        zstd::libzstd_static
         )
 
 # Include SGX lib if enabled

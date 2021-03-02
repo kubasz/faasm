@@ -26,7 +26,36 @@ FetchContent_Declare(faabric_ext
     CMAKE_ARGS "-DFAABRIC_BUILD_TESTS=OFF"
 )
 
-FetchContent_MakeAvailable(wavm_ext faabric_ext wamr_ext)
+set(ZSTD_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ZSTD_MULTITHREAD_SUPPORT OFF CACHE BOOL "" FORCE)
+set(ZSTD_LEGACY_SUPPORT OFF CACHE BOOL "" FORCE)
+set(ZSTD_ZLIB_SUPPORT OFF CACHE BOOL "" FORCE)
+set(ZSTD_LZMA_SUPPORT OFF CACHE BOOL "" FORCE)
+set(ZSTD_LZ4_SUPPORT OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(zstd_ext
+    GIT_REPOSITORY "https://github.com/facebook/zstd"
+    GIT_TAG "v1.4.8"
+    SOURCE_SUBDIR "build/cmake"
+    CMAKE_ARGS "-DZSTD_BUILD_CONTRIB=OFF \
+        -DZSTD_BUILD_CONTRIB=OFF \
+        -DZSTD_BUILD_PROGRAMS=OFF \
+        -DZSTD_BUILD_SHARED=OFF \
+        -DZSTD_BUILD_STATIC=ON \
+        -DZSTD_BUILD_TESTS=OFF \
+        -DZSTD_MULTITHREAD_SUPPORT=OFF \
+        -DZSTD_LEGACY_SUPPORT=OFF \
+        -DZSTD_ZLIB_SUPPORT=OFF \
+        -DZSTD_LZMA_SUPPORT=OFF \
+        -DZSTD_LZ4_SUPPORT=OFF"
+)
+
+FetchContent_MakeAvailable(wavm_ext faabric_ext wamr_ext zstd_ext)
 
 # Allow access to headers nested in other projects
 FetchContent_GetProperties(wavm_ext SOURCE_DIR FAASM_WAVM_SOURCE_DIR)
@@ -37,6 +66,11 @@ message(STATUS WAMR_ROOT_DIR ${WAMR_ROOT_DIR})
 
 FetchContent_GetProperties(faabric_ext BINARY_DIR FAABRIC_BINARY_DIR)
 message(STATUS FAABRIC_BINARY_DIR ${FAABRIC_BINARY_DIR})
+
+FetchContent_GetProperties(zstd_ext BINARY_DIR ZSTD_BINARY_DIR)
+message(STATUS ZSTD_BINARY_DIR ${ZSTD_BINARY_DIR})
+
+include(${ZSTD_BINARY_DIR}/zstdTargets.cmake)
 
 # SGX-specific dependencies
 if(FAASM_SGX_XRA)
@@ -73,4 +107,3 @@ ExternalProject_Add(catch2_ext
          -DCATCH_INSTALL_EXTRAS=OFF"
      CMAKE_CACHE_ARGS "-DCMAKE_INSTALL_PREFIX:STRING=${CMAKE_INSTALL_PREFIX}"
 )
- 

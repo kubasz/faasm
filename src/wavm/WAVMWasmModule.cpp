@@ -1,11 +1,14 @@
 #include "syscalls.h"
 #include <wavm/WAVMWasmModule.h>
 
+#include <algorithm>
 #include <boost/filesystem.hpp>
 #include <cereal/archives/portable_binary.hpp>
 #include <stdexcept>
+#include <functional>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <zstd.h>
 
 #include <faabric/util/bytes.h>
 #include <faabric/util/config.h>
@@ -34,7 +37,7 @@ constexpr int THREAD_STACK_SIZE(2 * ONE_MB_BYTES);
 using namespace WAVM;
 
 namespace wasm {
-static thread_local WAVMWasmModule* executingModule;
+static thread_local WAVMWasmModule* executingModule = nullptr;
 
 static Runtime::Instance* baseEnvModule = nullptr;
 static Runtime::Instance* baseWasiModule = nullptr;
@@ -1416,73 +1419,54 @@ wasm::MemorySerialised copyMemory(const WAVMWasmModule* thisModule) {
 }
 
 constexpr uint8_t DELTA_PROTOCOL_VERSION = 1;
-constexpr size_t DELTA_PAGE_BYTES = 1024;
-constexpr size_t PAGES_DELTA_PER_WASM = (WASM_BYTES_PER_PAGE / DELTA_PAGE_BYTES);
-const uint8_t EMPTY_DELTA_PAGE[DELTA_PAGE_BYTES] = {0};
+constexpr int DELTA_ZSTD_COMPRESS_LEVEL = 1;
 
 enum DeltaCommand : uint8_t {
     DELTACMD_MEMORY_PAGES = 0,
-    DELTACMD_CHANGE_1KPAGE = 1,
-    DELTACMD_NDP_WASMPAGE = 2,
+    DELTACMD_NDP_WASMPAGES = 1,
+    DELTACMD_XORPATCH_COMPRESSED = 2,
     DELTACMD_END = 0xFE,
 };
 
 void WAVMWasmModule::deltaSnapshot(std::ostream& outStream)
 {
-    const bool debugprint_bytecounts = true;
-    uint64_t modifiedSent{}, actuallyModified{};
-
     cereal::PortableBinaryOutputArchive archive(outStream);
     const wasm::MemorySerialised& oldMemory = this->preExecuteMemoryData;
-    const wasm::MemorySerialised& newMemory = copyMemory(this);
+    wasm::MemorySerialised newMemory = copyMemory(this);
     archive((uint8_t)DELTA_PROTOCOL_VERSION);
     archive(DELTACMD_MEMORY_PAGES, (uint64_t)newMemory.numPages);
-    faabric::util::getLogger()->debug("Generating delta snapshot");
-    for(auto [start, len] : this->ndpMappedPtrLens) {
+    faabric::util::getLogger()->debug("Generating delta snapshot in function {}", this->boundFunction);
+    // old xor new -> leads to long zeros (easily compressible) in unchanged areas
+    {
+        size_t shorterMemoryLen = std::min(oldMemory.data.size(), newMemory.data.size());
+        std::transform(oldMemory.data.cbegin(), oldMemory.data.cbegin() + shorterMemoryLen,
+                        newMemory.data.begin(), newMemory.data.begin(), std::bit_xor<uint8_t>());
+    }
+    // erase all ndp areas with zeros to avoid sending the mover
+    for (auto [start, len] : this->ndpMappedPtrLens) {
         faabric::util::getLogger()->debug("Found NDP mapping from {} len {}", start, len);
+        std::fill_n(newMemory.data.begin() + start * WASM_BYTES_PER_PAGE, len * WASM_BYTES_PER_PAGE, 0);
+        archive(DELTACMD_NDP_WASMPAGES, (uint64_t)start, (uint64_t)len);
     }
-    for (size_t wasmPage = 0; wasmPage < newMemory.numPages; wasmPage ++) {
-        // skip NDP-processed data (but notify the other side that it was there)
-        if (std::any_of(this->ndpMappedPtrLens.begin(),
-            this->ndpMappedPtrLens.end(),
-            [&](std::pair<Uptr, Uptr> mappedRange) {
-                return (wasmPage >= mappedRange.first) &&
-                    (wasmPage < (mappedRange.first + mappedRange.second));
-            })) {
-            archive(DELTACMD_NDP_WASMPAGE, (uint64_t)wasmPage);
-        } else {
-            size_t endPage1k = (wasmPage + 1) * PAGES_DELTA_PER_WASM;
-            for (size_t page1k = wasmPage * PAGES_DELTA_PER_WASM; page1k < endPage1k; page1k++) {
-                const U8* oldData = (wasmPage < oldMemory.numPages)
-                    ? (oldMemory.data.data() + page1k * DELTA_PAGE_BYTES)
-                    : (EMPTY_DELTA_PAGE);
-                const U8* newData = newMemory.data.data() + page1k * DELTA_PAGE_BYTES;
-                if (!std::equal(oldData, oldData + DELTA_PAGE_BYTES, newData)) {
-                    archive(DELTACMD_CHANGE_1KPAGE, (uint64_t) page1k);
-                    archive.saveBinary<1>(newData, DELTA_PAGE_BYTES);
-                    if (debugprint_bytecounts) {
-                        modifiedSent += DELTA_PAGE_BYTES;
-                        for(size_t i=0; i<DELTA_PAGE_BYTES; i++) {
-                            if (oldData[i] != newData[i]) {
-                                actuallyModified++;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    // compress the xor patch
+    std::vector<uint8_t> compressBuffer(ZSTD_compressBound(newMemory.data.size()), 0);
+    auto zstdResult = ZSTD_compress(compressBuffer.data(), compressBuffer.size(), newMemory.data.data(), newMemory.data.size(), DELTA_ZSTD_COMPRESS_LEVEL);
+    if (ZSTD_isError(zstdResult)) {
+        auto error = ZSTD_getErrorName(zstdResult);
+        throw std::runtime_error(std::string("ZSTD compression error: ") + error);
+    } else {
+        compressBuffer.resize(zstdResult);
     }
-    archive(DELTACMD_END);
+    faabric::util::getLogger()->debug("Compressed memory delta from {} to {} bytes", newMemory.data.size(), compressBuffer.size());
 
-    if(debugprint_bytecounts) {
-        const std::shared_ptr<spdlog::logger>& logger = faabric::util::getLogger();
-        logger->debug("Delta Snapshot bytes: modified sent {}, actually modified {}", modifiedSent, actuallyModified);
-    }
+    archive(DELTACMD_XORPATCH_COMPRESSED, (uint64_t)newMemory.data.size(), (uint64_t)compressBuffer.size());
+    archive.saveBinary<1>(compressBuffer.data(), compressBuffer.size());
+
+    archive(DELTACMD_END);
 }
 
 void WAVMWasmModule::deltaRestore(std::istream& inStream)
 {
-
     cereal::PortableBinaryInputArchive archive(inStream);
     uint8_t protocolVersion{};
     archive(protocolVersion);
@@ -1504,16 +1488,28 @@ void WAVMWasmModule::deltaRestore(std::istream& inStream)
                 }
                 break;
             }
-            case DELTACMD_NDP_WASMPAGE: {
-                uint64_t wasmPage{};
-                archive(wasmPage);
+            case DELTACMD_NDP_WASMPAGES: {
+                uint64_t wasmPageStart{}, wasmPageLen{};
+                archive(wasmPageStart, wasmPageLen);
                 break;
             }
-            case DELTACMD_CHANGE_1KPAGE: {
-                uint64_t page1k{};
-                archive(page1k);
-                U8* dataStart = Runtime::memoryArrayPtr<U8>(memory, page1k * DELTA_PAGE_BYTES, DELTA_PAGE_BYTES);
-                archive.loadBinary<1>(dataStart, DELTA_PAGE_BYTES);
+            case DELTACMD_XORPATCH_COMPRESSED: {
+                uint64_t decompSize{}, compSize{};
+                archive(decompSize, compSize);
+                std::vector<uint8_t> compBuffer(compSize, 0);
+                archive.loadBinary<1>(compBuffer.data(), compSize);
+                std::vector<uint8_t> decompBuffer(decompSize, 0);
+                auto zstdResult = ZSTD_decompress(decompBuffer.data(), decompBuffer.size(), compBuffer.data(), compBuffer.size());
+                if (ZSTD_isError(zstdResult)) {
+                    auto error = ZSTD_getErrorName(zstdResult);
+                    throw std::runtime_error(std::string("ZSTD compression error: ") + error);
+                } else if (zstdResult != decompBuffer.size()) {
+                    throw std::runtime_error("Mismatched decompression sizes in the NDP delta");
+                }
+                U8* dataStart = Runtime::memoryArrayPtr<U8>(memory, 0, decompBuffer.size());
+                // old ^ (old ^ new) = new
+                std::transform(decompBuffer.cbegin(), decompBuffer.cend(),
+                        dataStart, dataStart, std::bit_xor<uint8_t>());
                 break;
             }
             case DELTACMD_END: break;
